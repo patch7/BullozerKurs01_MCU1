@@ -1,6 +1,7 @@
 #ifndef __KPP
 #define __KPP
 
+#include <list>
 #include <queue>
 #include "stm32f4xx.h"
 #include "stm32f4xx_can.h"
@@ -25,7 +26,7 @@
 #define Gear3 (sm[13])
 #define Pres  (sm[14])
 
-extern std::queue<CanTxMsg> QueueCanTxMsg;
+extern std::queue<CanTxMsg, std::list<CanTxMsg>> QueueCanTxMsg;
 extern const uint16_t maxpwm;
 extern const uint8_t  minpwm;
 

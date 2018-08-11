@@ -1,3 +1,4 @@
+#include <list>
 #include <queue>
 #include "stm32f4xx.h"
 #include "misc.h"
@@ -11,30 +12,30 @@
 #include "KPP.h"
 #include "torque converter.h"
 
-//#define CURRENT_PWM10  (ADCConvertedValue[0])
-//#define CURRENT_PWM11  (ADCConvertedValue[1])
-//#define CURRENT_PWM12  (ADCConvertedValue[2])
-//#define CURRENT_PWM5   (ADCConvertedValue[3])
-//#define CURRENT_PWM6   (ADCConvertedValue[4])
-//#define CURRENT_PWM7   (ADCConvertedValue[5])
-//#define CURRENT_PWM8   (ADCConvertedValue[6])
-//#define CURRENT_PWM1   (ADCConvertedValue[7])
-//#define CURRENT_PWM4   (ADCConvertedValue[8])
-//#define RESISTANCE_1   (ADCConvertedValue[9])
-//#define CURRENT_PWM14  (ADCConvertedValue[10])
-//#define CURRENT_PWM15  (ADCConvertedValue[11])
-//#define CURRENT_PWM16  (ADCConvertedValue[12])
-//#define CURRENT_PWM9   (ADCConvertedValue[13])
-//#define CURRENT_PWM2   (ADCConvertedValue[14])
-//#define CURRENT_PWM3   (ADCConvertedValue[15])
-//#define FREQUENCY_3    (ADCConvertedValue[16])
-//#define RESISTANCE_2   (ADCConvertedValue[17])
-//#define FREQUENCY_1    (ADCConvertedValue[18])
-//#define FREQUENCY_2    (ADCConvertedValue[19])
-//#define CURRENT_PWM13  (ADCConvertedValue[20])
-//#define FREQUENCY_4    (ADCConvertedValue[21])
-//#define RESISTANCE_REF (ADCConvertedValue[22])
-//#define FREQUENCY_REF  (ADCConvertedValue[23])
+// current_pwm10  (ADCConvertedValue[0])
+// current_pwm11  (ADCConvertedValue[1])
+// current_pwm12  (ADCConvertedValue[2])
+// current_pwm5   (ADCConvertedValue[3])
+// current_pwm6   (ADCConvertedValue[4])
+// current_pwm7   (ADCConvertedValue[5])
+// current_pwm8   (ADCConvertedValue[6])
+// current_pwm1   (ADCConvertedValue[7])
+// current_pwm4   (ADCConvertedValue[8])
+// resistance_1   (ADCConvertedValue[9])
+// current_pwm14  (ADCConvertedValue[10])
+// current_pwm15  (ADCConvertedValue[11])
+// current_pwm16  (ADCConvertedValue[12])
+// current_pwm9   (ADCConvertedValue[13])
+// current_pwm2   (ADCConvertedValue[14])
+// current_pwm3   (ADCConvertedValue[15])
+// frequency_3    (ADCConvertedValue[16])
+// resistance_2   (ADCConvertedValue[17])
+// frequency_1    (ADCConvertedValue[18])
+// frequency_2    (ADCConvertedValue[19])
+// current_pwm13  (ADCConvertedValue[20])
+// frequency_4    (ADCConvertedValue[21])
+// resistance_ref (ADCConvertedValue[22])
+// frequency_ref  (ADCConvertedValue[23])
 
 #define ONE_MS         (time_flag[0])
 #define TEN_MS         (time_flag[1])
@@ -48,13 +49,16 @@ static Calibrate        cal;
 static KPP              kpp(9);
 //static TC               tc;
 static uint32_t         time_ms               = 0;
-static uint16_t         ADCConvertedValue[32] = {0};
+static volatile uint16_t ADCConvertedValue[24];
+static volatile uint16_t SPITxValue[5] {0, 1, 2, 3, 4};
+static volatile uint16_t SPIRxValue[5] {0, 1, 2, 3, 4};
+
 static bool             time_flag[4]          = {false};
 
 const uint16_t          maxpwm  = 500;
 const uint8_t           minpwm  = 0;
 
-std::queue<CanTxMsg>    QueueCanTxMsg;
+std::queue<CanTxMsg, std::list<CanTxMsg>> QueueCanTxMsg;
 
 void MaxAllRccBusConfig(void);
 void DMAforADCInit(void);
@@ -63,8 +67,7 @@ void CANInit(void);
 void TIM_PWMInit(void);
 void TimerInit(void);
 void FlashInit(void);
-void SPIInit(void);
-void DMAforSPIInit(void);
+void DMAandSPIInit(void);
 bool CanTxMailBoxEmpty(CAN_TypeDef*);
 
 void main()
@@ -89,8 +92,7 @@ void main()
   RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOI, ENABLE);
   
   CANInit();
-  DMAforSPIInit();
-  SPIInit();
+  DMAandSPIInit();
   DMAforADCInit();
   ADCInputInit();
   TIM_PWMInit();
@@ -103,9 +105,10 @@ void main()
 
     if(ONE_MS)
     {
-      kpp.AnalogSet(ADCConvertedValue);
+      kpp.AnalogSet(const_cast<const uint16_t*>(ADCConvertedValue));
       kpp.GraphSetFR();//управление клапанами в пропорциональном режиме
       ONE_MS = false;
+      DMAandSPIInit();
     }
     if(TEN_MS)
     {
@@ -132,9 +135,28 @@ void main()
       //  tc.lock();//очень часто вызывается
       //else
       //  tc.unlock();//очень часто вызывается
-      HUNDRED_MS = false;
 
-      SPI_I2S_SendData(SPI3, 100);
+      CanTxMsg TxMessage;
+      TxMessage.StdId   = 0x400;
+      TxMessage.RTR     = CAN_RTR_DATA;
+      TxMessage.IDE     = CAN_ID_STD;
+      TxMessage.DLC     = 5;
+      TxMessage.Data[0] = SPITxValue[0];
+      TxMessage.Data[1] = SPITxValue[1];
+      TxMessage.Data[2] = SPITxValue[2];
+      TxMessage.Data[3] = SPITxValue[3];
+      TxMessage.Data[4] = SPITxValue[4];
+      QueueCanTxMsg.push(TxMessage);
+
+      TxMessage.StdId   = 0x401;
+      TxMessage.Data[0] = SPIRxValue[0];
+      TxMessage.Data[1] = SPIRxValue[1];
+      TxMessage.Data[2] = SPIRxValue[2];
+      TxMessage.Data[3] = SPIRxValue[3];
+      TxMessage.Data[4] = SPIRxValue[4];
+      QueueCanTxMsg.push(TxMessage);
+      
+      HUNDRED_MS = false;
     }
 
     while(!QueueCanTxMsg.empty() && CanTxMailBoxEmpty(CAN1))
@@ -179,45 +201,18 @@ void FlashInit()
   FLASH_PrefetchBufferCmd(ENABLE);
   FLASH_SetLatency(FLASH_Latency_5);
 }
-void DMAforSPIInit()
+void DMAandSPIInit()
 {
-  DMA_DeInit(DMA1_Stream0);//SPI3_Rx
-  DMA_DeInit(DMA1_Stream5);//SPI3_Tx
+  RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3, ENABLE);
   RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA1, ENABLE);
 
-  DMA_InitTypeDef DMA_InitStruct;
-  DMA_StructInit(&DMA_InitStruct);
-  DMA_InitStruct.DMA_Channel            = DMA_Channel_0;
-  DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&(SPI3->DR);
-  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(ADCConvertedValue + 24);
-  DMA_InitStruct.DMA_BufferSize         = 2;
-  DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
-  DMA_Init(DMA1_Stream0, &DMA_InitStruct);
-  
-  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(ADCConvertedValue + 16);
-  DMA_InitStruct.DMA_DIR                = DMA_DIR_MemoryToPeripheral;
-  DMA_Init(DMA1_Stream5, &DMA_InitStruct);
-
-  DMA_ITConfig(DMA1_Stream0, DMA_IT_TC, ENABLE);
-  DMA_ITConfig(DMA1_Stream5, DMA_IT_TC, ENABLE);
-
-  NVIC_InitTypeDef NVIC_InitStruct;
-  NVIC_InitStruct.NVIC_IRQChannel                   = DMA1_Stream0_IRQn;
-  NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 0x0;
-  NVIC_InitStruct.NVIC_IRQChannelSubPriority        = 0x0;
-  NVIC_InitStruct.NVIC_IRQChannelCmd                = ENABLE;
-  NVIC_Init(&NVIC_InitStruct);
-  
-  NVIC_InitStruct.NVIC_IRQChannel                   = DMA1_Stream5_IRQn;
-  NVIC_Init(&NVIC_InitStruct);
-
-  DMA_Cmd(DMA1_Stream0, ENABLE);
-  DMA_Cmd(DMA1_Stream5, ENABLE);
-}
-void SPIInit()
-{
   SPI_I2S_DeInit(SPI3);
-  RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3, ENABLE);
+  DMA_DeInit(DMA1_Stream0);//SPI3_Rx
+  DMA_DeInit(DMA1_Stream5);//SPI3_Tx
+
+  GPIO_PinAFConfig(GPIOC, GPIO_PinSource10, GPIO_AF_SPI3);
+  GPIO_PinAFConfig(GPIOC, GPIO_PinSource11, GPIO_AF_SPI3);
+  GPIO_PinAFConfig(GPIOC, GPIO_PinSource12, GPIO_AF_SPI3);
 
   GPIO_InitTypeDef GPIO_InitStruct;
   GPIO_StructInit(&GPIO_InitStruct);
@@ -227,19 +222,62 @@ void SPIInit()
   GPIO_InitStruct.GPIO_PuPd  = GPIO_PuPd_DOWN;
   GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  GPIO_PinAFConfig(GPIOC, GPIO_PinSource10, GPIO_AF_SPI3);
-  GPIO_PinAFConfig(GPIOC, GPIO_PinSource11, GPIO_AF_SPI3);
-  GPIO_PinAFConfig(GPIOC, GPIO_PinSource12, GPIO_AF_SPI3);
- 
   SPI_InitTypeDef SPI_InitStruct;
   SPI_StructInit(&SPI_InitStruct);
-  SPI_InitStruct.SPI_DataSize = SPI_DataSize_16b;
-  SPI_InitStruct.SPI_NSS      = SPI_NSS_Soft;
+  SPI_InitStruct.SPI_DataSize          = SPI_DataSize_16b;
+  SPI_InitStruct.SPI_NSS               = SPI_NSS_Soft;
+  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
+  SPI_InitStruct.SPI_FirstBit          = SPI_FirstBit_MSB;
+
+  DMA_InitTypeDef DMA_InitStruct;
+  DMA_StructInit(&DMA_InitStruct);
+  DMA_InitStruct.DMA_Channel            = DMA_Channel_0;
+  DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&(SPI3->DR);
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(SPIRxValue);
+  DMA_InitStruct.DMA_BufferSize         = 5;
+  DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
+  DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+  DMA_InitStruct.DMA_MemoryDataSize     = DMA_MemoryDataSize_HalfWord;
+  DMA_InitStruct.DMA_Priority           = DMA_Priority_High;
+  //DMA_InitStruct.DMA_Mode               = DMA_Mode_Circular;
+  DMA_Init(DMA1_Stream0, &DMA_InitStruct);
+
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(SPITxValue);
+  DMA_InitStruct.DMA_DIR                = DMA_DIR_MemoryToPeripheral;
+  DMA_Init(DMA1_Stream5, &DMA_InitStruct);
+
   SPI_Init(SPI3, &SPI_InitStruct);
 
-  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Rx | SPI_I2S_DMAReq_Tx, ENABLE);
+  /***********************************************************************************************
+  Разбиение на отдельные функции запуска передачи и отключения SPI, должно устранить бесполезное
+  переписывание регистров SPI & DMA, что сохранит нам несколько тактов. Так же это устранит
+  зависание в цикле на проверку флагов, что должно благоприятно сказаться на отзывчивости системы.
+  НЕОБХОДИМО ЗАМЕРИТЬ ПРИБЛИЗИТЕЛЬНОЕ ВРЕМЯ ЗАВИСАНИЯ В ЦИКЛЕ ПРОВЕРКИ ФЛАГОВ!!!
+  ************************************************************************************************/
+  //Вынести в отдельную функцию SPISetSend
+  DMA_Cmd(DMA1_Stream0, ENABLE);
+  DMA_Cmd(DMA1_Stream5, ENABLE);
+
+  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Rx, ENABLE);
+  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Tx, ENABLE);
 
   SPI_Cmd(SPI3, ENABLE);
+
+  //Перед вызовом функции SPIResetSend проверить флаги на RESET
+  while (DMA_GetFlagStatus(DMA1_Stream5, DMA_IT_TCIF5) == RESET);
+  while (DMA_GetFlagStatus(DMA1_Stream0, DMA_IT_TCIF0) == RESET);
+
+  //Вынести в отдельную функцию SPIResetSend
+  DMA_ClearFlag(DMA1_Stream5, DMA_IT_TCIF5);
+  DMA_ClearFlag(DMA1_Stream0, DMA_IT_TCIF0);
+
+  DMA_Cmd(DMA1_Stream5, DISABLE);
+  DMA_Cmd(DMA1_Stream0, DISABLE);
+
+  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Tx, DISABLE);
+  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Rx, DISABLE);
+
+  SPI_Cmd(SPI3, DISABLE);
 }
 //Настраиваем модуль DMA2 для автоматической обработки каналов ADC1 и ADC3
 void DMAforADCInit()
@@ -319,7 +357,7 @@ void ADCInputInit()
   ADC_InitTypeDef ADC_InitStruct;
   ADC_StructInit(&ADC_InitStruct);
   ADC_InitStruct.ADC_ScanConvMode         = ENABLE;
-  ADC_InitStruct.ADC_ExternalTrigConv     = ADC_ExternalTrigConv_T2_TRGO;
+  ADC_InitStruct.ADC_ExternalTrigConv     = ADC_ExternalTrigConv_T8_TRGO;
   ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_Rising;
   ADC_InitStruct.ADC_NbrOfConversion      = 16;
   ADC_Init(ADC1, &ADC_InitStruct);
@@ -370,10 +408,10 @@ void ADCInputInit()
 void TimerInit()
 {
   TIM_DeInit(TIM7);
-  TIM_DeInit(TIM2);
+  TIM_DeInit(TIM8);
   
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM7, ENABLE);
-  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM8, ENABLE);
 
   TIM_TimeBaseInitTypeDef TIM_TimeBaseInitStruct;
   TIM_TimeBaseStructInit(&TIM_TimeBaseInitStruct);
@@ -381,21 +419,18 @@ void TimerInit()
   TIM_TimeBaseInitStruct.TIM_Period    = 100;//1 мс
   TIM_TimeBaseInit(TIM7, &TIM_TimeBaseInitStruct);
 
-  TIM_TimeBaseInitStruct.TIM_Period    = 100;
-  TIM_TimeBaseInit(TIM2, &TIM_TimeBaseInitStruct);
+  TIM_TimeBaseInitStruct.TIM_Period    = 200;//1мс
+  TIM_TimeBaseInit(TIM8, &TIM_TimeBaseInitStruct);
 
-  TIM_SetCounter(TIM2, 0);
+  TIM_SetCounter(TIM8, 0);
 
-  TIM_ITConfig(TIM2, TIM_IT_Update, ENABLE);
   TIM_ITConfig(TIM7, TIM_IT_Update, ENABLE);
-
-  NVIC_EnableIRQ(TIM2_IRQn);
   NVIC_EnableIRQ(TIM7_IRQn);
 
-  TIM_SelectOutputTrigger(TIM2, TIM_TRGOSource_Update);
+  TIM_SelectOutputTrigger(TIM8, TIM_TRGOSource_Update);
   
+  TIM_Cmd(TIM8, ENABLE);
   TIM_Cmd(TIM7, ENABLE);
-  TIM_Cmd(TIM2, ENABLE);
 }
 void CANInit()
 {
@@ -561,27 +596,6 @@ extern "C"
     if(DMA_GetITStatus(DMA2_Stream1, DMA_IT_TCIF1))
       DMA_ClearITPendingBit(DMA2_Stream1, DMA_IT_TCIF1);
   }
-
-  void DMA1_Stream0_IRQHandler()
-  {
-    if(DMA_GetITStatus(DMA1_Stream0, DMA_IT_TCIF0))//Rx
-    {
-      DMA_ClearITPendingBit(DMA1_Stream0, DMA_IT_TCIF0);
-      DMA_Cmd(DMA1_Stream0, DISABLE);
-    }
-  }
-  void DMA1_Stream5_IRQHandler()
-  {
-    if(DMA_GetITStatus(DMA1_Stream5, DMA_IT_TCIF5))//Tx
-    {
-      DMA_ClearITPendingBit(DMA1_Stream5, DMA_IT_TCIF5);
-
-      // Ждем последний байт
-      while(SPI_I2S_GetFlagStatus(SPI1,SPI_I2S_FLAG_TXE) == RESET);
-      while(SPI_I2S_GetFlagStatus(SPI1,SPI_I2S_FLAG_BSY) == SET);
-      DMA_Cmd(DMA1_Stream5, DISABLE);
-    }
-  }
   /************************************************************************************************
   Прерывание по TIM7 - 1 мс. Ведем отсчет времени (системные часы).
   ************************************************************************************************/
@@ -600,11 +614,6 @@ extern "C"
       if(!(time_ms % 100))
         time_flag[3] = true;
     }
-  }
-  void TIM2_IRQHandler()
-  {
-    if(TIM_GetITStatus(TIM2, TIM_IT_Update))
-      TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
   }
   /************************************************************************************************
   Принимает по CAN дискретные сигналы с ОУ - ЗАДЕЛ НА ДИСТАНЦИОННОЕ УПРАВЛЕНИЕ.
