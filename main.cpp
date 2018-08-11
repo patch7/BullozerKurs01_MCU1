@@ -12,51 +12,72 @@
 #include "KPP.h"
 #include "torque converter.h"
 
-// current_pwm10  (ADCConvertedValue[0])
-// current_pwm11  (ADCConvertedValue[1])
-// current_pwm12  (ADCConvertedValue[2])
-// current_pwm5   (ADCConvertedValue[3])
-// current_pwm6   (ADCConvertedValue[4])
-// current_pwm7   (ADCConvertedValue[5])
-// current_pwm8   (ADCConvertedValue[6])
-// current_pwm1   (ADCConvertedValue[7])
-// current_pwm4   (ADCConvertedValue[8])
-// resistance_1   (ADCConvertedValue[9])
-// current_pwm14  (ADCConvertedValue[10])
-// current_pwm15  (ADCConvertedValue[11])
-// current_pwm16  (ADCConvertedValue[12])
-// current_pwm9   (ADCConvertedValue[13])
-// current_pwm2   (ADCConvertedValue[14])
-// current_pwm3   (ADCConvertedValue[15])
-// frequency_3    (ADCConvertedValue[16])
-// resistance_2   (ADCConvertedValue[17])
-// frequency_1    (ADCConvertedValue[18])
-// frequency_2    (ADCConvertedValue[19])
-// current_pwm13  (ADCConvertedValue[20])
-// frequency_4    (ADCConvertedValue[21])
-// resistance_ref (ADCConvertedValue[22])
-// frequency_ref  (ADCConvertedValue[23])
+// current_pwm10  (ConvertedValue[0])
+// current_pwm11  (ConvertedValue[1])
+// current_pwm12  (ConvertedValue[2])
+// current_pwm5   (ConvertedValue[3])
+// current_pwm6   (ConvertedValue[4])
+// current_pwm7   (ConvertedValue[5])
+// current_pwm8   (ConvertedValue[6])
+// current_pwm1   (ConvertedValue[7])
+// current_pwm4   (ConvertedValue[8])
+// resistance_1   (ConvertedValue[9])
+// current_pwm14  (ConvertedValue[10])
+// current_pwm15  (ConvertedValue[11])
+// current_pwm16  (ConvertedValue[12])
+// current_pwm9   (ConvertedValue[13])
+// current_pwm2   (ConvertedValue[14])
+// current_pwm3   (ConvertedValue[15])
+// frequency_3    (ConvertedValue[16])
+// resistance_2   (ConvertedValue[17])
+// frequency_1    (ConvertedValue[18])
+// frequency_2    (ConvertedValue[19])
+// current_pwm13  (ConvertedValue[20])
+// frequency_4    (ConvertedValue[21])
+// resistance_ref (ConvertedValue[22])
+// frequency_ref  (ConvertedValue[23])
+
+// voltage_5      (ConvertedValue[24])
+// voltage_2      (ConvertedValue[25])
+// voltage_11     (ConvertedValue[26])
+// voltage_8      (ConvertedValue[27])
+// voltage_17     (ConvertedValue[28])
+// voltage_14     (ConvertedValue[29])
+// voltage_4      (ConvertedValue[30])
+// voltage_1      (ConvertedValue[31])
+// voltage_16     (ConvertedValue[32])
+// voltage_13     (ConvertedValue[33])
+// voltage_9      (ConvertedValue[34])
+// voltage_12     (ConvertedValue[35])
+// voltage_15     (ConvertedValue[36])
+// voltage_18     (ConvertedValue[37])
+// voltage_10     (ConvertedValue[38])
+// voltage_7      (ConvertedValue[39])
+// voltage_sys    (ConvertedValue[40])
+// voltage_3      (ConvertedValue[41])
+// voltage_6      (ConvertedValue[42])
+
+// digital_in     (ConvertedValue[43]) ch1 - ch16
+// digital_in     (ConvertedValue[44]) ch17, ch18, in5V, address
 
 #define ONE_MS         (time_flag[0])
 #define TEN_MS         (time_flag[1])
 #define TWENTY_FIVE_MS (time_flag[2])
 #define HUNDRED_MS     (time_flag[3])
 
-//static const uint16_t DEFAULT = 0x010;
-static Calibrate::State state = Calibrate::Not;
 static Pressure         pres;
 static Calibrate        cal;
 static KPP              kpp(9);
 //static TC               tc;
-static uint32_t         time_ms               = 0;
-static volatile uint16_t ADCConvertedValue[24];
-static volatile uint16_t SPITxValue[5] {0, 1, 2, 3, 4};
-static volatile uint16_t SPIRxValue[5] {0, 1, 2, 3, 4};
+static Calibrate::State state        = Calibrate::Not;
+static uint32_t         time_ms      = 0;
+static const uint16_t   DigCtrlDef   = 0x010;
+static bool             time_flag[4] = {false};
 
-static bool             time_flag[4]          = {false};
+static volatile uint16_t ConvertedValue[45];
 
-const uint16_t          maxpwm  = 500;
-const uint8_t           minpwm  = 0;
+const  uint16_t         maxpwm       = 500;
+const  uint8_t          minpwm       = 0;
 
 std::queue<CanTxMsg, std::list<CanTxMsg>> QueueCanTxMsg;
 
@@ -105,7 +126,7 @@ void main()
 
     if(ONE_MS)
     {
-      kpp.AnalogSet(const_cast<const uint16_t*>(ADCConvertedValue));
+      kpp.AnalogSet(const_cast<const uint16_t*>(ConvertedValue));
       kpp.GraphSetFR();//управление клапанами в пропорциональном режиме
       ONE_MS = false;
       DMAandSPIInit();
@@ -136,26 +157,6 @@ void main()
       //else
       //  tc.unlock();//очень часто вызывается
 
-      CanTxMsg TxMessage;
-      TxMessage.StdId   = 0x400;
-      TxMessage.RTR     = CAN_RTR_DATA;
-      TxMessage.IDE     = CAN_ID_STD;
-      TxMessage.DLC     = 5;
-      TxMessage.Data[0] = SPITxValue[0];
-      TxMessage.Data[1] = SPITxValue[1];
-      TxMessage.Data[2] = SPITxValue[2];
-      TxMessage.Data[3] = SPITxValue[3];
-      TxMessage.Data[4] = SPITxValue[4];
-      QueueCanTxMsg.push(TxMessage);
-
-      TxMessage.StdId   = 0x401;
-      TxMessage.Data[0] = SPIRxValue[0];
-      TxMessage.Data[1] = SPIRxValue[1];
-      TxMessage.Data[2] = SPIRxValue[2];
-      TxMessage.Data[3] = SPIRxValue[3];
-      TxMessage.Data[4] = SPIRxValue[4];
-      QueueCanTxMsg.push(TxMessage);
-      
       HUNDRED_MS = false;
     }
 
@@ -201,6 +202,11 @@ void FlashInit()
   FLASH_PrefetchBufferCmd(ENABLE);
   FLASH_SetLatency(FLASH_Latency_5);
 }
+/**************************************************************************************************
+Настройка DMA для управления Rx/Tx SPI.
+При различных буферах на прием и передачу, не работает!!!
+Если Rx или Tx не используется, его настройка также необходима!!!
+**************************************************************************************************/
 void DMAandSPIInit()
 {
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3, ENABLE);
@@ -226,24 +232,24 @@ void DMAandSPIInit()
   SPI_StructInit(&SPI_InitStruct);
   SPI_InitStruct.SPI_DataSize          = SPI_DataSize_16b;
   SPI_InitStruct.SPI_NSS               = SPI_NSS_Soft;
-  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256;
+  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_64;
   SPI_InitStruct.SPI_FirstBit          = SPI_FirstBit_MSB;
 
   DMA_InitTypeDef DMA_InitStruct;
   DMA_StructInit(&DMA_InitStruct);
   DMA_InitStruct.DMA_Channel            = DMA_Channel_0;
   DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&(SPI3->DR);
-  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(SPIRxValue);
-  DMA_InitStruct.DMA_BufferSize         = 5;
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(ConvertedValue + 24);
+  DMA_InitStruct.DMA_BufferSize         = 21;
   DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
   DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
   DMA_InitStruct.DMA_MemoryDataSize     = DMA_MemoryDataSize_HalfWord;
   DMA_InitStruct.DMA_Priority           = DMA_Priority_High;
-  //DMA_InitStruct.DMA_Mode               = DMA_Mode_Circular;
   DMA_Init(DMA1_Stream0, &DMA_InitStruct);
 
-  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(SPITxValue);
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(nullptr);
   DMA_InitStruct.DMA_DIR                = DMA_DIR_MemoryToPeripheral;
+  DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Disable;
   DMA_Init(DMA1_Stream5, &DMA_InitStruct);
 
   SPI_Init(SPI3, &SPI_InitStruct);
@@ -290,7 +296,7 @@ void DMAforADCInit()
   DMA_StructInit(&DMA_InitStruct);
   DMA_InitStruct.DMA_Channel            = DMA_Channel_0;
   DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&(ADC1->DR);
-  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)ADCConvertedValue;
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)ConvertedValue;
   DMA_InitStruct.DMA_BufferSize         = 16;
   DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
   DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
@@ -301,7 +307,7 @@ void DMAforADCInit()
   
   DMA_InitStruct.DMA_Channel            = DMA_Channel_2;
   DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&(ADC3->DR);
-  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(ADCConvertedValue + 16);
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(ConvertedValue + 16);
   DMA_InitStruct.DMA_BufferSize         = 8;
   DMA_Init(DMA2_Stream1, &DMA_InitStruct);
   
