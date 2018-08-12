@@ -6,29 +6,38 @@
 ///   ||//  \\||     //        //     //    //       //    //   //////\\     //     //////\\    ///
 ///   | /    \ |  ////////     //     //    //       //////    //      \\    //    //      \\   ///
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void KPP::DigitalSet(const uint16_t data)//Good
+void KPP::DigitalSet(const uint32_t data)
 {
-  if(parking != (0x0003 & (data >> 4)))
-    parking_ch = true;
-  else
-    parking_ch = false;
-
-  if(direction != (0x0003 & data))
+  if(parking & 1 != data & (1 << 16))
   {
-    direct_ch  = true;
-    old_direct = direction;
+    parking_ch = true;
+    parking   ^= 1;
   }
-  else
-    direct_ch  = false;
-  
-  direction   = 0x0003 & data;
-  clutch_st   = 0x0003 & (data >> 2);
-  parking     = 0x0003 & (data >> 4);
-  reverse     = 0x0003 & (data >> 6);
-  oil_filter  = 0x0001 & (data >> 8);
-  //d_generator = 0x0001 & (data >> 9);
+
+  if(reverse & 1 != data & (1 << 17))
+    reverse ^= 1;
+
+  clutch_st = 3 & (data >> 18);
+
+  if(7 & data >> 20)
+  {
+    uint8_t new_dir;
+    if(4 & data >> 20)
+      new_dir = N;
+    else if(2 & data >> 20)
+      new_dir = R;
+    else if(1 & data >> 20)
+      new_dir = F;
+
+    if(direction != new_dir)
+    {
+      direct_ch  = true;
+      old_direct = direction;
+      direction  = new_dir;
+    }
+  }
 }
-void KPP::AnalogSet(const uint16_t* data)//Good
+void KPP::AnalogSet(const uint16_t* data)
 {
   Rev.push(data[0]);
   Gear2.push(data[1]);
@@ -40,12 +49,11 @@ void KPP::AnalogSet(const uint16_t* data)//Good
   OtL.push(data[14]);
   Gear3.push(data[20]);
 
-  //cal.Left.push(data[0]);
-  //cal.Right.push(data[1]);
-  //cal.Throt.push(data[2]);
-  //cal.Brake.push(data[3]);
-  //cal.Decel.push(data[4]);
-  //cal.Temp.push(data[5]);
+  Left.push(data[24]);
+  Right.push(data[25]);
+  Throt.push(data[26]);
+  Brake.push(data[27]);
+  Decel.push(data[28]);
 }
 void KPP::RequestRpm(Calibrate& cal, const uint16_t x)
 {
@@ -127,37 +135,38 @@ void KPP::Send()//Good, надо исправить в соответствии 
 //////////       //       //    //  ||  \\||     //     // //    //    //  //            //////////
 //////////       ///////   //////   ||   \ |     //     //   //   //////   ///////       //////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**************************************************************************************************
+На данный момент parking_ch изменяется только в DigitalSet, что допускает вероятность многократного
+прохождения условий в данном методе!!! Один из способов решить проблему обнулять parking_ch в этом
+методе. В данном методе ненужно управление фрикционами ОТ и БФ, т.к. это делается в BrakeRotate.
+**************************************************************************************************/
 void KPP::Parking()//Исправить в соответствии с коментариями
 {
-  if(parking == ON && parking_ch)
+  if(parking_ch)
   {
-    ResetAllValve();
-    clutch = 0;
-  }
-  else if(parking == OFF && parking_ch)//Проверить, возможно не соответствует ТТ
-  {
-    SetBfL();
-    SetBfR();
-    ResetOtL();//ОТ выключен
-    ResetOtR();//ОТ выключен
-    if(rpm > 350)//Убрать магическое число
+    if(parking == ON)
+    {
+      //ResetAllValve
+      ResetBfL();
+      ResetBfR();
+      ResetFirst();
+      ResetSecond();
+      ResetThird();
+      ResetForward();
+      ResetReverse();
+      SetOtL();
+      SetOtR();
+  
+      clutch = 0;
+    }
+    else if(rpm > 350)//Убрать магическое число
     {
       clutch = 1;
       OnClutch();
     }
+    parking_ch = false;
   }
-}
-void KPP::ResetAllValve() const//Good
-{
-  SetOtL();
-  SetOtR();
-  ResetBfL();
-  ResetBfR();
-  ResetFirst();
-  ResetSecond();
-  ResetThird();
-  ResetForward();
-  ResetReverse();
 }
 void KPP::SetClutch()//Проверить на пропорциональное управление
 {
@@ -249,8 +258,9 @@ void KPP::SwitchDirection(Calibrate& cal)//Good привести в соотве
       ResetForward();
       ResetReverse();
     }
+    direct_ch = false;
   }
-          
+
   if(direction == N && parking == ON && rpm < 350)//магическое число
     start_eng = true;
   else

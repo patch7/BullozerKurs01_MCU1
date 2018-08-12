@@ -63,7 +63,8 @@
 #define ONE_MS         (time_flag[0])
 #define TEN_MS         (time_flag[1])
 #define TWENTY_FIVE_MS (time_flag[2])
-#define HUNDRED_MS     (time_flag[3])
+#define FIFTY_MS       (time_flag[3])
+#define HUNDRED_MS     (time_flag[4])
 
 static Pressure         pres;
 static Calibrate        cal;
@@ -72,7 +73,7 @@ static KPP              kpp(9);
 static Calibrate::State state        = Calibrate::Not;
 static uint32_t         time_ms      = 0;
 static const uint16_t   DigCtrlDef   = 0x010;
-static bool             time_flag[4] = {false};
+static bool             time_flag[5] = {false};
 
 static volatile uint16_t ConvertedValue[45];
 
@@ -90,6 +91,7 @@ void TimerInit(void);
 void FlashInit(void);
 void DMAandSPIInit(void);
 bool CanTxMailBoxEmpty(CAN_TypeDef*);
+void SPI3SendReceive(void);
 
 void main()
 {
@@ -129,7 +131,6 @@ void main()
       kpp.AnalogSet(const_cast<const uint16_t*>(ConvertedValue));
       kpp.GraphSetFR();//управление клапанами в пропорциональном режиме
       ONE_MS = false;
-      DMAandSPIInit();
     }
     if(TEN_MS)
     {
@@ -137,10 +138,13 @@ void main()
         cal.Valve(state, pres);//Калибровка клапана!
       TEN_MS = false;
     }
-    if(TWENTY_FIVE_MS)
+    if(FIFTY_MS)
     {
       kpp.Send();
-      TWENTY_FIVE_MS = false;
+      SPI3SendReceive();
+      uint32_t temp = ConvertedValue[43] << 16;
+      kpp.DigitalSet(temp | ConvertedValue[44]);
+      FIFTY_MS = false;
     }
     if(HUNDRED_MS)
     {
@@ -253,14 +257,12 @@ void DMAandSPIInit()
   DMA_Init(DMA1_Stream5, &DMA_InitStruct);
 
   SPI_Init(SPI3, &SPI_InitStruct);
-
-  /***********************************************************************************************
-  Разбиение на отдельные функции запуска передачи и отключения SPI, должно устранить бесполезное
-  переписывание регистров SPI & DMA, что сохранит нам несколько тактов. Так же это устранит
-  зависание в цикле на проверку флагов, что должно благоприятно сказаться на отзывчивости системы.
-  НЕОБХОДИМО ЗАМЕРИТЬ ПРИБЛИЗИТЕЛЬНОЕ ВРЕМЯ ЗАВИСАНИЯ В ЦИКЛЕ ПРОВЕРКИ ФЛАГОВ!!!
-  ************************************************************************************************/
-  //Вынести в отдельную функцию SPISetSend
+}
+/**************************************************************************************************
+  Выделение в отдельную функцию вкл. и выкл. SPI&DMA, убирает бесполезное переписывание регистров.
+**************************************************************************************************/
+void SPI3SendReceive()
+{
   DMA_Cmd(DMA1_Stream0, ENABLE);
   DMA_Cmd(DMA1_Stream5, ENABLE);
 
@@ -269,11 +271,9 @@ void DMAandSPIInit()
 
   SPI_Cmd(SPI3, ENABLE);
 
-  //Перед вызовом функции SPIResetSend проверить флаги на RESET
   while (DMA_GetFlagStatus(DMA1_Stream5, DMA_IT_TCIF5) == RESET);
   while (DMA_GetFlagStatus(DMA1_Stream0, DMA_IT_TCIF0) == RESET);
 
-  //Вынести в отдельную функцию SPIResetSend
   DMA_ClearFlag(DMA1_Stream5, DMA_IT_TCIF5);
   DMA_ClearFlag(DMA1_Stream0, DMA_IT_TCIF0);
 
@@ -617,8 +617,10 @@ extern "C"
         time_flag[1] = true;
       if(!(time_ms % 25))
         time_flag[2] = true;
-      if(!(time_ms % 100))
+      if(!(time_ms % 50))
         time_flag[3] = true;
+      if(!(time_ms % 100))
+        time_flag[4] = true;
     }
   }
   /************************************************************************************************
@@ -639,9 +641,6 @@ extern "C"
       if(RxMsg.IDE == CAN_ID_STD)
         switch(RxMsg.StdId)
         {
-          //case 0x005:
-          //  kpp.DigitalSet(RxMsg.Data[4] << 8 | RxMsg.Data[0], cal);
-          //  end_transmit = time_ms;                                                        break;
           case 0x010: cal.CtrlAndRPM(RxMsg.Data[0],RxMsg.Data[2]<<8|RxMsg.Data[1]);          break;
           case 0x100: cal.OtLeftTime(RxMsg);                                                 break;
           case 0x101: cal.OtLeftPres(RxMsg);                                                 break;

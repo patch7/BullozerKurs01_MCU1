@@ -206,7 +206,7 @@ public:
   void GraphSetFR();
 
   //Work with the data
-  void DigitalSet(const uint16_t);
+  void DigitalSet(const uint32_t);
   void AnalogSet(const uint16_t*);
 
   void Send();
@@ -243,8 +243,6 @@ private:
 
   void OnClutch()                        const;
   void OffClutch()                       const;
-
-  void ResetAllValve()                   const;
 
   static const uint8_t num_point = 125;
   const uint8_t resol            = 8;//Коэффициент для оборотов ДВС
