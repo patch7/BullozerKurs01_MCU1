@@ -70,15 +70,15 @@ static Pressure         pres;
 static Calibrate        cal;
 static KPP              kpp(9);
 //static TC               tc;
-static Calibrate::State state        = Calibrate::Not;
-static uint32_t         time_ms      = 0;
-static const uint16_t   DigCtrlDef   = 0x010;
-static bool             time_flag[5] = {false};
+static Calibrate::State state      = Calibrate::Not;
+static uint32_t         time_ms    = 0;
+static const uint16_t   DigCtrlDef = 0x010;
+static bool             time_flag[5];
 
 static volatile uint16_t ConvertedValue[45];
 
-const  uint16_t         maxpwm       = 500;
-const  uint8_t          minpwm       = 0;
+const  uint16_t         maxpwm     = 500;
+const  uint8_t          minpwm     = 0;
 
 std::queue<CanTxMsg, std::list<CanTxMsg>> QueueCanTxMsg;
 
@@ -141,7 +141,6 @@ void main()
     if(FIFTY_MS)
     {
       kpp.Send();
-      SPI3SendReceive();
       uint32_t temp = ConvertedValue[43] << 16;
       kpp.DigitalSet(temp | ConvertedValue[44]);
       FIFTY_MS = false;
@@ -153,6 +152,7 @@ void main()
       kpp.SwitchDirection(cal);
       kpp.BrakeRotate(cal);
       kpp.RequestRpm(cal);
+      HUNDRED_MS = false;
 
       //if(cal.Parking_Is_On())
       //  tc.reset();//очень часто вызывается
@@ -160,8 +160,6 @@ void main()
       //  tc.lock();//очень часто вызывается
       //else
       //  tc.unlock();//очень часто вызывается
-
-      HUNDRED_MS = false;
     }
 
     while(!QueueCanTxMsg.empty() && CanTxMailBoxEmpty(CAN1))
@@ -236,7 +234,7 @@ void DMAandSPIInit()
   SPI_StructInit(&SPI_InitStruct);
   SPI_InitStruct.SPI_DataSize          = SPI_DataSize_16b;
   SPI_InitStruct.SPI_NSS               = SPI_NSS_Soft;
-  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_64;
+  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_4;
   SPI_InitStruct.SPI_FirstBit          = SPI_FirstBit_MSB;
 
   DMA_InitTypeDef DMA_InitStruct;
@@ -248,7 +246,7 @@ void DMAandSPIInit()
   DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
   DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
   DMA_InitStruct.DMA_MemoryDataSize     = DMA_MemoryDataSize_HalfWord;
-  DMA_InitStruct.DMA_Priority           = DMA_Priority_High;
+  DMA_InitStruct.DMA_Priority           = DMA_Priority_Low;
   DMA_Init(DMA1_Stream0, &DMA_InitStruct);
 
   DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(nullptr);
@@ -612,15 +610,18 @@ extern "C"
       TIM_ClearITPendingBit(TIM7, TIM_IT_Update);
       ++time_ms;
 
-      time_flag[0] = true;
+      ONE_MS = true;
       if(!(time_ms % 10))
-        time_flag[1] = true;
+        TEN_MS = true;
       if(!(time_ms % 25))
-        time_flag[2] = true;
+        TWENTY_FIVE_MS = true;
       if(!(time_ms % 50))
-        time_flag[3] = true;
+      {
+        SPI3SendReceive();
+        FIFTY_MS = true;
+      }
       if(!(time_ms % 100))
-        time_flag[4] = true;
+        HUNDRED_MS = true;
     }
   }
   /************************************************************************************************

@@ -8,25 +8,25 @@
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void KPP::DigitalSet(const uint32_t data)
 {
-  if(parking & 1 != data & (1 << 16))
+  if((parking & 1) != ((data >> 16) & 1))
   {
     parking_ch = true;
     parking   ^= 1;
   }
 
-  if(reverse & 1 != data & (1 << 17))
+  if((reverse & 1) != ((data >> 17) & 1))
     reverse ^= 1;
 
-  clutch_st = 3 & (data >> 18);
+  clutch_st = ((data >> 18) & 3);
 
-  if(7 & data >> 20)
+  if(7 & (data >> 20))
   {
     uint8_t new_dir;
-    if(4 & data >> 20)
+    if(4 & (data >> 20))
       new_dir = N;
-    else if(2 & data >> 20)
+    else if(2 & (data >> 20))
       new_dir = R;
-    else if(1 & data >> 20)
+    else if(1 & (data >> 20))
       new_dir = F;
 
     if(direction != new_dir)
@@ -102,10 +102,10 @@ void KPP::Send()//Good, надо исправить в соответствии 
     switch(TxMessage.StdId)
     {
       case 0x001:
-        for(uint8_t i = 0; i < 8; ++i)
+        for(uint8_t i = 0, j = 0; i < TxMessage.DLC; i += 2, ++j)
         {
-          TxMessage.Data[i]   = static_cast<uint8_t>(sm[i].get());
-          TxMessage.Data[++i] = static_cast<uint8_t>(sm[i].get() >> 8);
+          TxMessage.Data[i]   = static_cast<uint8_t>(sm[j].get());
+          TxMessage.Data[i+1] = static_cast<uint8_t>(sm[j].get() >> 8);
         }
         break;
       case 0x002:
@@ -452,14 +452,14 @@ void Calibrate::CtrlAndRPM(uint8_t state, uint16_t data)//Good
         d.AnalogCtrlAndRPM[4].first = 0;
       else
         d.AnalogCtrlAndRPM[4].first = Decel.get() - 7;         break;//min
-    case 0x26: d.AnalogCtrlAndRPM[5].first  = data;                break;//min
+    case 0x26: d.AnalogCtrlAndRPM[5].first  = data;            break;//min
 
     case 0x41: d.AnalogCtrlAndRPM[0].second = Throt.get() + 7; break;//max
     case 0x42: d.AnalogCtrlAndRPM[1].second = Left.get()  + 7; break;//max
     case 0x43: d.AnalogCtrlAndRPM[2].second = Right.get() + 7; break;//max
     case 0x44: d.AnalogCtrlAndRPM[3].second = Brake.get() + 7; break;//max
     case 0x45: d.AnalogCtrlAndRPM[4].second = Decel.get() + 7; break;//max
-    case 0x46: d.AnalogCtrlAndRPM[5].second = data;                break;//max
+    case 0x46: d.AnalogCtrlAndRPM[5].second = data;            break;//max
   }
 }
 void Calibrate::Send(CanTxMsg& TxMessage, std::pair<uint16_t, uint16_t>* data)//Good
