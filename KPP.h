@@ -1,6 +1,7 @@
 #ifndef __KPP
 #define __KPP
 
+#include <list>
 #include <queue>
 #include "stm32f4xx.h"
 #include "stm32f4xx_can.h"
@@ -25,7 +26,7 @@
 #define Gear3 (sm[13])
 #define Pres  (sm[14])
 
-extern std::queue<CanTxMsg> QueueCanTxMsg;
+extern std::queue<CanTxMsg, std::list<CanTxMsg>> QueueCanTxMsg;
 extern const uint16_t maxpwm;
 extern const uint8_t  minpwm;
 
@@ -205,7 +206,7 @@ public:
   void GraphSetFR();
 
   //Work with the data
-  void DigitalSet(const uint16_t);
+  void DigitalSet(const uint32_t);
   void AnalogSet(const uint16_t*);
 
   void Send();
@@ -242,8 +243,6 @@ private:
 
   void OnClutch()                        const;
   void OffClutch()                       const;
-
-  void ResetAllValve()                   const;
 
   static const uint8_t num_point = 125;
   const uint8_t resol            = 8;//Коэффициент для оборотов ДВС

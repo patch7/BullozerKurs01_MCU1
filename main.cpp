@@ -1,3 +1,4 @@
+#include <list>
 #include <queue>
 #include "stm32f4xx.h"
 #include "misc.h"
@@ -11,50 +12,75 @@
 #include "KPP.h"
 #include "torque converter.h"
 
-#define CURRENT_PWM10  (ADCConvertedValue[0])
-#define CURRENT_PWM11  (ADCConvertedValue[1])
-#define CURRENT_PWM12  (ADCConvertedValue[2])
-#define CURRENT_PWM5   (ADCConvertedValue[3])
-#define CURRENT_PWM6   (ADCConvertedValue[4])
-#define CURRENT_PWM7   (ADCConvertedValue[5])
-#define CURRENT_PWM8   (ADCConvertedValue[6])
-#define CURRENT_PWM1   (ADCConvertedValue[7])
-#define CURRENT_PWM4   (ADCConvertedValue[8])
-#define RESISTANCE_1   (ADCConvertedValue[9])
-#define CURRENT_PWM14  (ADCConvertedValue[10])
-#define CURRENT_PWM15  (ADCConvertedValue[11])
-#define CURRENT_PWM16  (ADCConvertedValue[12])
-#define CURRENT_PWM9   (ADCConvertedValue[13])
-#define CURRENT_PWM2   (ADCConvertedValue[14])
-#define CURRENT_PWM3   (ADCConvertedValue[15])
-#define FREQUENCY_3    (ADCConvertedValue[16])
-#define RESISTANCE_2   (ADCConvertedValue[17])
-#define FREQUENCY_1    (ADCConvertedValue[18])
-#define FREQUENCY_2    (ADCConvertedValue[19])
-#define CURRENT_PWM13  (ADCConvertedValue[20])
-#define FREQUENCY_4    (ADCConvertedValue[21])
-#define RESISTANCE_REF (ADCConvertedValue[22])
-#define FREQUENCY_REF  (ADCConvertedValue[23])
+// current_pwm10  (ConvertedValue[0])
+// current_pwm11  (ConvertedValue[1])
+// current_pwm12  (ConvertedValue[2])
+// current_pwm5   (ConvertedValue[3])
+// current_pwm6   (ConvertedValue[4])
+// current_pwm7   (ConvertedValue[5])
+// current_pwm8   (ConvertedValue[6])
+// current_pwm1   (ConvertedValue[7])
+// current_pwm4   (ConvertedValue[8])
+// resistance_1   (ConvertedValue[9])
+// current_pwm14  (ConvertedValue[10])
+// current_pwm15  (ConvertedValue[11])
+// current_pwm16  (ConvertedValue[12])
+// current_pwm9   (ConvertedValue[13])
+// current_pwm2   (ConvertedValue[14])
+// current_pwm3   (ConvertedValue[15])
+// frequency_3    (ConvertedValue[16])
+// resistance_2   (ConvertedValue[17])
+// frequency_1    (ConvertedValue[18])
+// frequency_2    (ConvertedValue[19])
+// current_pwm13  (ConvertedValue[20])
+// frequency_4    (ConvertedValue[21])
+// resistance_ref (ConvertedValue[22])
+// frequency_ref  (ConvertedValue[23])
+
+// voltage_5      (ConvertedValue[24])
+// voltage_2      (ConvertedValue[25])
+// voltage_11     (ConvertedValue[26])
+// voltage_8      (ConvertedValue[27])
+// voltage_17     (ConvertedValue[28])
+// voltage_14     (ConvertedValue[29])
+// voltage_4      (ConvertedValue[30])
+// voltage_1      (ConvertedValue[31])
+// voltage_16     (ConvertedValue[32])
+// voltage_13     (ConvertedValue[33])
+// voltage_9      (ConvertedValue[34])
+// voltage_12     (ConvertedValue[35])
+// voltage_15     (ConvertedValue[36])
+// voltage_18     (ConvertedValue[37])
+// voltage_10     (ConvertedValue[38])
+// voltage_7      (ConvertedValue[39])
+// voltage_sys    (ConvertedValue[40])
+// voltage_3      (ConvertedValue[41])
+// voltage_6      (ConvertedValue[42])
+
+// digital_in     (ConvertedValue[43]) ch1 - ch16
+// digital_in     (ConvertedValue[44]) ch17, ch18, in5V, address
 
 #define ONE_MS         (time_flag[0])
 #define TEN_MS         (time_flag[1])
 #define TWENTY_FIVE_MS (time_flag[2])
-#define HUNDRED_MS     (time_flag[3])
+#define FIFTY_MS       (time_flag[3])
+#define HUNDRED_MS     (time_flag[4])
 
-std::queue<CanTxMsg> QueueCanTxMsg;
 static Pressure         pres;
-static Calibrate::State state = Calibrate::Not;
 static Calibrate        cal;
 static KPP              kpp(9);
 //static TC               tc;
-static uint32_t         time_ms       = 0;
-static uint16_t         ADCConvertedValue[24] = {0};
+static Calibrate::State state      = Calibrate::Not;
+static uint32_t         time_ms    = 0;
+static const uint16_t   DigCtrlDef = 0x010;
+static bool             time_flag[5];
 
-const uint16_t maxpwm  = 500;
-const uint8_t  minpwm  = 0;
+static volatile uint16_t ConvertedValue[45];
 
-//static const uint16_t DEFAULT        = 0x010;
-static bool             time_flag[4] = {false};
+const  uint16_t         maxpwm     = 500;
+const  uint8_t          minpwm     = 0;
+
+std::queue<CanTxMsg, std::list<CanTxMsg>> QueueCanTxMsg;
 
 void MaxAllRccBusConfig(void);
 void DMAforADCInit(void);
@@ -63,18 +89,20 @@ void CANInit(void);
 void TIM_PWMInit(void);
 void TimerInit(void);
 void FlashInit(void);
+void DMAandSPIInit(void);
 bool CanTxMailBoxEmpty(CAN_TypeDef*);
+void SPI3SendReceive(void);
 
 void main()
 {
   MaxAllRccBusConfig();
   FlashInit();
   
-  GPIO_DeInit(GPIOA);//CAN1, ADC2(ch1, ch3 - ch7), TIM1(ch1 - ch3)
-  GPIO_DeInit(GPIOB);//ADC2ch8, TIM2ch4, TIM4(ch1 - ch4)
-  GPIO_DeInit(GPIOC);//ADC3(ch10, ch11), ADC2(ch12 - ch15), TIM3(ch1 - ch4)
+  GPIO_DeInit(GPIOA);
+  GPIO_DeInit(GPIOB);
+  GPIO_DeInit(GPIOC);
   GPIO_DeInit(GPIOD);
-  GPIO_DeInit(GPIOF);//ADC3(ch4, ch6 - ch8)
+  GPIO_DeInit(GPIOF);
   GPIO_DeInit(GPIOH);
   GPIO_DeInit(GPIOI);
   
@@ -87,6 +115,7 @@ void main()
   RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOI, ENABLE);
   
   CANInit();
+  DMAandSPIInit();
   DMAforADCInit();
   ADCInputInit();
   TIM_PWMInit();
@@ -99,7 +128,7 @@ void main()
 
     if(ONE_MS)
     {
-      kpp.AnalogSet(ADCConvertedValue);
+      kpp.AnalogSet(const_cast<const uint16_t*>(ConvertedValue));
       kpp.GraphSetFR();//управление клапанами в пропорциональном режиме
       ONE_MS = false;
     }
@@ -109,10 +138,12 @@ void main()
         cal.Valve(state, pres);//Калибровка клапана!
       TEN_MS = false;
     }
-    if(TWENTY_FIVE_MS)
+    if(FIFTY_MS)
     {
       kpp.Send();
-      TWENTY_FIVE_MS = false;
+      uint32_t temp = ConvertedValue[43] << 16;
+      kpp.DigitalSet(temp | ConvertedValue[44]);
+      FIFTY_MS = false;
     }
     if(HUNDRED_MS)
     {
@@ -121,6 +152,7 @@ void main()
       kpp.SwitchDirection(cal);
       kpp.BrakeRotate(cal);
       kpp.RequestRpm(cal);
+      HUNDRED_MS = false;
 
       //if(cal.Parking_Is_On())
       //  tc.reset();//очень часто вызывается
@@ -128,7 +160,6 @@ void main()
       //  tc.lock();//очень часто вызывается
       //else
       //  tc.unlock();//очень часто вызывается
-      HUNDRED_MS = false;
     }
 
     while(!QueueCanTxMsg.empty() && CanTxMailBoxEmpty(CAN1))
@@ -173,6 +204,85 @@ void FlashInit()
   FLASH_PrefetchBufferCmd(ENABLE);
   FLASH_SetLatency(FLASH_Latency_5);
 }
+/**************************************************************************************************
+Настройка DMA для управления Rx/Tx SPI.
+При различных буферах на прием и передачу, не работает!!!
+Если Rx или Tx не используется, его настройка также необходима!!!
+**************************************************************************************************/
+void DMAandSPIInit()
+{
+  RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI3, ENABLE);
+  RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA1, ENABLE);
+
+  SPI_I2S_DeInit(SPI3);
+  DMA_DeInit(DMA1_Stream0);//SPI3_Rx
+  DMA_DeInit(DMA1_Stream5);//SPI3_Tx
+
+  GPIO_PinAFConfig(GPIOC, GPIO_PinSource10, GPIO_AF_SPI3);
+  GPIO_PinAFConfig(GPIOC, GPIO_PinSource11, GPIO_AF_SPI3);
+  GPIO_PinAFConfig(GPIOC, GPIO_PinSource12, GPIO_AF_SPI3);
+
+  GPIO_InitTypeDef GPIO_InitStruct;
+  GPIO_StructInit(&GPIO_InitStruct);
+  GPIO_InitStruct.GPIO_Pin   = GPIO_Pin_10 | GPIO_Pin_11 | GPIO_Pin_12;
+  GPIO_InitStruct.GPIO_Mode  = GPIO_Mode_AF;
+  GPIO_InitStruct.GPIO_Speed = GPIO_High_Speed;
+  GPIO_InitStruct.GPIO_PuPd  = GPIO_PuPd_DOWN;
+  GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  SPI_InitTypeDef SPI_InitStruct;
+  SPI_StructInit(&SPI_InitStruct);
+  SPI_InitStruct.SPI_DataSize          = SPI_DataSize_16b;
+  SPI_InitStruct.SPI_NSS               = SPI_NSS_Soft;
+  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_4;
+  SPI_InitStruct.SPI_FirstBit          = SPI_FirstBit_MSB;
+
+  DMA_InitTypeDef DMA_InitStruct;
+  DMA_StructInit(&DMA_InitStruct);
+  DMA_InitStruct.DMA_Channel            = DMA_Channel_0;
+  DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&(SPI3->DR);
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(ConvertedValue + 24);
+  DMA_InitStruct.DMA_BufferSize         = 21;
+  DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
+  DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+  DMA_InitStruct.DMA_MemoryDataSize     = DMA_MemoryDataSize_HalfWord;
+  DMA_InitStruct.DMA_Priority           = DMA_Priority_Low;
+  DMA_Init(DMA1_Stream0, &DMA_InitStruct);
+
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(nullptr);
+  DMA_InitStruct.DMA_DIR                = DMA_DIR_MemoryToPeripheral;
+  DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Disable;
+  DMA_Init(DMA1_Stream5, &DMA_InitStruct);
+
+  SPI_Init(SPI3, &SPI_InitStruct);
+}
+/**************************************************************************************************
+  Выделение в отдельную функцию вкл. и выкл. SPI&DMA, убирает бесполезное переписывание регистров.
+**************************************************************************************************/
+void SPI3SendReceive()
+{
+  DMA_Cmd(DMA1_Stream0, ENABLE);
+  DMA_Cmd(DMA1_Stream5, ENABLE);
+
+  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Rx, ENABLE);
+  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Tx, ENABLE);
+
+  SPI_Cmd(SPI3, ENABLE);
+
+  while (DMA_GetFlagStatus(DMA1_Stream5, DMA_IT_TCIF5) == RESET);
+  while (DMA_GetFlagStatus(DMA1_Stream0, DMA_IT_TCIF0) == RESET);
+
+  DMA_ClearFlag(DMA1_Stream5, DMA_IT_TCIF5);
+  DMA_ClearFlag(DMA1_Stream0, DMA_IT_TCIF0);
+
+  DMA_Cmd(DMA1_Stream5, DISABLE);
+  DMA_Cmd(DMA1_Stream0, DISABLE);
+
+  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Tx, DISABLE);
+  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Rx, DISABLE);
+
+  SPI_Cmd(SPI3, DISABLE);
+}
 //Настраиваем модуль DMA2 для автоматической обработки каналов ADC1 и ADC3
 void DMAforADCInit()
 {
@@ -184,7 +294,7 @@ void DMAforADCInit()
   DMA_StructInit(&DMA_InitStruct);
   DMA_InitStruct.DMA_Channel            = DMA_Channel_0;
   DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&(ADC1->DR);
-  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)ADCConvertedValue;
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)ConvertedValue;
   DMA_InitStruct.DMA_BufferSize         = 16;
   DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
   DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
@@ -195,15 +305,12 @@ void DMAforADCInit()
   
   DMA_InitStruct.DMA_Channel            = DMA_Channel_2;
   DMA_InitStruct.DMA_PeripheralBaseAddr = (uint32_t)&(ADC3->DR);
-  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(ADCConvertedValue + 16);
+  DMA_InitStruct.DMA_Memory0BaseAddr    = (uint32_t)(ConvertedValue + 16);
   DMA_InitStruct.DMA_BufferSize         = 8;
   DMA_Init(DMA2_Stream1, &DMA_InitStruct);
   
   DMA_ITConfig(DMA2_Stream0, DMA_IT_TC, ENABLE);
   DMA_ITConfig(DMA2_Stream1, DMA_IT_TC, ENABLE);
-
-  DMA_Cmd(DMA2_Stream0, ENABLE);
-  DMA_Cmd(DMA2_Stream1, ENABLE);
 
   NVIC_InitTypeDef NVIC_InitStruct;
   NVIC_InitStruct.NVIC_IRQChannel                   = DMA2_Stream0_IRQn;
@@ -214,6 +321,9 @@ void DMAforADCInit()
   
   NVIC_InitStruct.NVIC_IRQChannel                   = DMA2_Stream1_IRQn;
   NVIC_Init(&NVIC_InitStruct);
+
+  DMA_Cmd(DMA2_Stream0, ENABLE);
+  DMA_Cmd(DMA2_Stream1, ENABLE);
 }
 /**************************************************************************************************
 Настраиваем ADC1 (0-15), ADC3 (0-7) на преобразование.
@@ -251,7 +361,7 @@ void ADCInputInit()
   ADC_InitTypeDef ADC_InitStruct;
   ADC_StructInit(&ADC_InitStruct);
   ADC_InitStruct.ADC_ScanConvMode         = ENABLE;
-  ADC_InitStruct.ADC_ExternalTrigConv     = ADC_ExternalTrigConv_T2_TRGO;
+  ADC_InitStruct.ADC_ExternalTrigConv     = ADC_ExternalTrigConv_T8_TRGO;
   ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_Rising;
   ADC_InitStruct.ADC_NbrOfConversion      = 16;
   ADC_Init(ADC1, &ADC_InitStruct);
@@ -302,10 +412,10 @@ void ADCInputInit()
 void TimerInit()
 {
   TIM_DeInit(TIM7);
-  TIM_DeInit(TIM2);
+  TIM_DeInit(TIM8);
   
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM7, ENABLE);
-  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM8, ENABLE);
 
   TIM_TimeBaseInitTypeDef TIM_TimeBaseInitStruct;
   TIM_TimeBaseStructInit(&TIM_TimeBaseInitStruct);
@@ -313,21 +423,18 @@ void TimerInit()
   TIM_TimeBaseInitStruct.TIM_Period    = 100;//1 мс
   TIM_TimeBaseInit(TIM7, &TIM_TimeBaseInitStruct);
 
-  TIM_TimeBaseInitStruct.TIM_Period    = 100;
-  TIM_TimeBaseInit(TIM2, &TIM_TimeBaseInitStruct);
+  TIM_TimeBaseInitStruct.TIM_Period    = 200;//1мс
+  TIM_TimeBaseInit(TIM8, &TIM_TimeBaseInitStruct);
 
-  TIM_SetCounter(TIM2, 0);
+  TIM_SetCounter(TIM8, 0);
 
-  TIM_ITConfig(TIM2, TIM_IT_Update, ENABLE);
   TIM_ITConfig(TIM7, TIM_IT_Update, ENABLE);
-
-  NVIC_EnableIRQ(TIM2_IRQn);
   NVIC_EnableIRQ(TIM7_IRQn);
 
-  TIM_SelectOutputTrigger(TIM2, TIM_TRGOSource_Update);
+  TIM_SelectOutputTrigger(TIM8, TIM_TRGOSource_Update);
   
+  TIM_Cmd(TIM8, ENABLE);
   TIM_Cmd(TIM7, ENABLE);
-  TIM_Cmd(TIM2, ENABLE);
 }
 void CANInit()
 {
@@ -384,8 +491,7 @@ void CANInit()
   NVIC_InitStruct.NVIC_IRQChannel                   = CAN1_SCE_IRQn;
   NVIC_Init(&NVIC_InitStruct);
 
-  CAN_ITConfig(CAN1, CAN_IT_FMP0|CAN_IT_FMP1|CAN_IT_TME|CAN_IT_EWG|CAN_IT_EPV|CAN_IT_LEC|
-                     CAN_IT_ERR, ENABLE);
+  CAN_ITConfig(CAN1, CAN_IT_FMP0|CAN_IT_FMP1|CAN_IT_EWG|CAN_IT_EPV|CAN_IT_LEC|CAN_IT_ERR, ENABLE);
 }
 void TIM_PWMInit()
 {
@@ -503,19 +609,19 @@ extern "C"
       TIM_ClearITPendingBit(TIM7, TIM_IT_Update);
       ++time_ms;
 
-      time_flag[0] = true;
+      ONE_MS = true;
       if(!(time_ms % 10))
-        time_flag[1] = true;
+        TEN_MS = true;
       if(!(time_ms % 25))
-        time_flag[2] = true;
+        TWENTY_FIVE_MS = true;
+      if(!(time_ms % 50))
+      {
+        SPI3SendReceive();
+        FIFTY_MS = true;
+      }
       if(!(time_ms % 100))
-        time_flag[3] = true;
+        HUNDRED_MS = true;
     }
-  }
-  void TIM2_IRQHandler()
-  {
-    if(TIM_GetITStatus(TIM2, TIM_IT_Update))
-      TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
   }
   /************************************************************************************************
   Принимает по CAN дискретные сигналы с ОУ - ЗАДЕЛ НА ДИСТАНЦИОННОЕ УПРАВЛЕНИЕ.
@@ -535,9 +641,6 @@ extern "C"
       if(RxMsg.IDE == CAN_ID_STD)
         switch(RxMsg.StdId)
         {
-          //case 0x005:
-          //  kpp.DigitalSet(RxMsg.Data[4] << 8 | RxMsg.Data[0], cal);
-          //  end_transmit = time_ms;                                                        break;
           case 0x010: cal.CtrlAndRPM(RxMsg.Data[0],RxMsg.Data[2]<<8|RxMsg.Data[1]);          break;
           case 0x100: cal.OtLeftTime(RxMsg);                                                 break;
           case 0x101: cal.OtLeftPres(RxMsg);                                                 break;
@@ -581,11 +684,6 @@ extern "C"
       CAN_ClearITPendingBit(CAN1, CAN_IT_FMP1);
       CAN_FIFORelease(CAN1, CAN_FIFO1);
     }
-  }
-  void CAN1_TX_IRQHandler()
-  {
-    if(CAN_GetITStatus(CAN1, CAN_IT_TME))
-      CAN_ClearITPendingBit(CAN1, CAN_IT_TME);
   }
   void CAN1_SCE_IRQHandler()
   {
