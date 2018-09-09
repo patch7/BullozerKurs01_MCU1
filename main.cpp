@@ -81,6 +81,7 @@ const  uint16_t         maxpwm     = 500;
 const  uint8_t          minpwm     = 0;
 
 std::queue<CanTxMsg, std::list<CanTxMsg>> QueueCanTxMsg;
+std::queue<CanRxMsg, std::list<CanRxMsg>> QueueCanRxMsg;
 
 void MaxAllRccBusConfig(void);
 void DMAforADCInit(void);
@@ -167,10 +168,54 @@ void main()
       CAN_Transmit(CAN1, &QueueCanTxMsg.front());
       QueueCanTxMsg.pop();
     }
+    while(!QueueCanRxMsg.empty())
+    {
+      CanRxMsg RxMsg = QueueCanRxMsg.front();
+      QueueCanRxMsg.pop();
+
+      if(RxMsg.IDE == CAN_ID_STD)
+        switch(RxMsg.StdId)
+        {
+          case 0x010: cal.CtrlAndRPM(RxMsg.Data[0], RxMsg.Data[2] << 8 | RxMsg.Data[1]); break;
+          case 0x100: cal.OtLeftTime(RxMsg);                                             break;
+          case 0x101: cal.OtLeftPres(RxMsg);                                             break;
+          case 0x102: cal.OtRightTime(RxMsg);                                            break;
+          case 0x103: cal.OtRightPres(RxMsg);                                            break;
+          case 0x104: cal.BfLeftTime(RxMsg);                                             break;
+          case 0x105: cal.BfLeftPres(RxMsg);                                             break;
+          case 0x106: cal.BfRightTime(RxMsg);                                            break;
+          case 0x107: cal.BfRightPres(RxMsg);                                            break;
+          case 0x108: cal.ForwardTime(RxMsg);                                            break;
+          case 0x109: cal.ForwardPres(RxMsg);                                            break;
+          case 0x10A: cal.ReverseTime(RxMsg);                                            break;
+          case 0x10B: cal.ReversePres(RxMsg);                                            break;
+          case 0x10C: cal.OneTime(RxMsg);                                                break;
+          case 0x10D: cal.OnePres(RxMsg);                                                break;
+          case 0x10E: cal.TwoTime(RxMsg);                                                break;
+          case 0x10F: cal.TwoPres(RxMsg);                                                break;
+          case 0x110: cal.ThreeTime(RxMsg);                                              break;
+          case 0x111: cal.ThreePres(RxMsg);                                              break;
+          case 0x112: cal.Save();                                                        break;
+          case 0x113: cal.SendData();                                                    break;
+          case 0x114: cal.SendDataValve();                                               break;
+          case 0x120: state = static_cast<Calibrate::State>(RxMsg.Data[0]);              break;
+          case 0x181: pres.i = RxMsg.Data[3]<<24|RxMsg.Data[2]<<16|RxMsg.Data[1]<<8|RxMsg.Data[0];
+            if(pres.f < 0)
+              pres.f = 0;
+            break;
+        }
+      else
+        switch(RxMsg.ExtId)
+        {
+          case 0x0CF00400: kpp.SetRpm(RxMsg.Data[4] << 8 | RxMsg.Data[3]); break;
+        }
+    }
   }
 }
 
-//Настраиваем тактирование ядра и переферии от HSE(25 МГц) на максимальные частоты.
+/**************************************************************************************************
+Максимальные частоты ядра и переферии от HSE(25 МГц).
+**************************************************************************************************/
 void MaxAllRccBusConfig()
 {
   SystemInit();
@@ -198,6 +243,10 @@ void MaxAllRccBusConfig()
     RCC_SYSCLKConfig(RCC_SYSCLKSource_PLLCLK);//SYSCLK clock = PLLCLK
     while(RCC_GetSYSCLKSource() != 8) {}
   }
+
+  RCC_ClocksTypeDef clock;
+  RCC_GetClocksFreq(&clock);
+  SysTick_Config(clock.HCLK_Frequency / 1000);
 }
 void FlashInit()
 {
@@ -206,7 +255,6 @@ void FlashInit()
 }
 /**************************************************************************************************
 Настройка DMA для управления Rx/Tx SPI.
-При различных буферах на прием и передачу, не работает!!!
 Если Rx или Tx не используется, его настройка также необходима!!!
 **************************************************************************************************/
 void DMAandSPIInit()
@@ -234,7 +282,7 @@ void DMAandSPIInit()
   SPI_StructInit(&SPI_InitStruct);
   SPI_InitStruct.SPI_DataSize          = SPI_DataSize_16b;
   SPI_InitStruct.SPI_NSS               = SPI_NSS_Soft;
-  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_4;
+  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_2;
   SPI_InitStruct.SPI_FirstBit          = SPI_FirstBit_MSB;
 
   DMA_InitTypeDef DMA_InitStruct;
@@ -246,6 +294,7 @@ void DMAandSPIInit()
   DMA_InitStruct.DMA_MemoryInc          = DMA_MemoryInc_Enable;
   DMA_InitStruct.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
   DMA_InitStruct.DMA_MemoryDataSize     = DMA_MemoryDataSize_HalfWord;
+  DMA_InitStruct.DMA_Mode               = DMA_Mode_Circular;
   DMA_InitStruct.DMA_Priority           = DMA_Priority_Low;
   DMA_Init(DMA1_Stream0, &DMA_InitStruct);
 
@@ -255,12 +304,7 @@ void DMAandSPIInit()
   DMA_Init(DMA1_Stream5, &DMA_InitStruct);
 
   SPI_Init(SPI3, &SPI_InitStruct);
-}
-/**************************************************************************************************
-  Выделение в отдельную функцию вкл. и выкл. SPI&DMA, убирает бесполезное переписывание регистров.
-**************************************************************************************************/
-void SPI3SendReceive()
-{
+
   DMA_Cmd(DMA1_Stream0, ENABLE);
   DMA_Cmd(DMA1_Stream5, ENABLE);
 
@@ -268,22 +312,10 @@ void SPI3SendReceive()
   SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Tx, ENABLE);
 
   SPI_Cmd(SPI3, ENABLE);
-
-  while (DMA_GetFlagStatus(DMA1_Stream5, DMA_IT_TCIF5) == RESET);
-  while (DMA_GetFlagStatus(DMA1_Stream0, DMA_IT_TCIF0) == RESET);
-
-  DMA_ClearFlag(DMA1_Stream5, DMA_IT_TCIF5);
-  DMA_ClearFlag(DMA1_Stream0, DMA_IT_TCIF0);
-
-  DMA_Cmd(DMA1_Stream5, DISABLE);
-  DMA_Cmd(DMA1_Stream0, DISABLE);
-
-  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Tx, DISABLE);
-  SPI_I2S_DMACmd(SPI3, SPI_I2S_DMAReq_Rx, DISABLE);
-
-  SPI_Cmd(SPI3, DISABLE);
 }
-//Настраиваем модуль DMA2 для автоматической обработки каналов ADC1 и ADC3
+/**************************************************************************************************
+Настраиваем DMA2 для аппаратной обработки каналов ADC1 и ADC3.
+**************************************************************************************************/
 void DMAforADCInit()
 {
   DMA_DeInit(DMA2_Stream0);//ADC1
@@ -326,7 +358,7 @@ void DMAforADCInit()
   DMA_Cmd(DMA2_Stream1, ENABLE);
 }
 /**************************************************************************************************
-Настраиваем ADC1 (0-15), ADC3 (0-7) на преобразование.
+Настраиваем ADC1 (0-15), ADC3 (0-7).
 **************************************************************************************************/
 void ADCInputInit()
 {
@@ -405,36 +437,22 @@ void ADCInputInit()
   ADC_SoftwareStartConv(ADC3);
 }
 /**************************************************************************************************
-Настраиваем таймер 7 и 8 для подсчета времени и прерывания ADC соответственно.
-Необходимо обеспечить полное заполнение класса скользящей медианы до применения ее результатов,
-путем изменения времени прерывания для DMA.
+Настраиваем таймер 8 для прерывания ADC.
 **************************************************************************************************/
 void TimerInit()
 {
-  TIM_DeInit(TIM7);
   TIM_DeInit(TIM8);
-  
-  RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM7, ENABLE);
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM8, ENABLE);
 
   TIM_TimeBaseInitTypeDef TIM_TimeBaseInitStruct;
   TIM_TimeBaseStructInit(&TIM_TimeBaseInitStruct);
   TIM_TimeBaseInitStruct.TIM_Prescaler = 839;//всегда +1, Mgz*10
-  TIM_TimeBaseInitStruct.TIM_Period    = 100;//1 мс
-  TIM_TimeBaseInit(TIM7, &TIM_TimeBaseInitStruct);
-
   TIM_TimeBaseInitStruct.TIM_Period    = 200;//1мс
   TIM_TimeBaseInit(TIM8, &TIM_TimeBaseInitStruct);
 
   TIM_SetCounter(TIM8, 0);
-
-  TIM_ITConfig(TIM7, TIM_IT_Update, ENABLE);
-  NVIC_EnableIRQ(TIM7_IRQn);
-
   TIM_SelectOutputTrigger(TIM8, TIM_TRGOSource_Update);
-  
   TIM_Cmd(TIM8, ENABLE);
-  TIM_Cmd(TIM7, ENABLE);
 }
 void CANInit()
 {
@@ -582,13 +600,12 @@ void TIM_PWMInit()
   TIM_Cmd(TIM4, ENABLE);
   TIM_Cmd(TIM5, ENABLE);
 }
-
+/**************************************************************************************************
+Обработчики прерывания.
+Отсчет времени работы ПО, Закидываем в очередь принятые сообщения CAN.
+**************************************************************************************************/
 extern "C"
 {
-  /************************************************************************************************
-  Обработчики прерывания DMA привязаны к T2_TRGO.
-  ЗАПОЛНЕНИЕ ФИЛЬТРА СКОЛЬЗЯЩЕЙ МЕДИАНЫ БУДЕТ В ГЛАВНОМ ЦИКЛЕ ПРОГРАММЫ (main, с частотой 1 мс)
-  ************************************************************************************************/
   void DMA2_Stream0_IRQHandler()
   {
     if(DMA_GetITStatus(DMA2_Stream0, DMA_IT_TCIF0))
@@ -599,36 +616,20 @@ extern "C"
     if(DMA_GetITStatus(DMA2_Stream1, DMA_IT_TCIF1))
       DMA_ClearITPendingBit(DMA2_Stream1, DMA_IT_TCIF1);
   }
-  /************************************************************************************************
-  Прерывание по TIM7 - 1 мс. Ведем отсчет времени (системные часы).
-  ************************************************************************************************/
-  void TIM7_IRQHandler()
+  void SysTick_Handler()
   {
-    if(TIM_GetITStatus(TIM7, TIM_IT_Update))
-    {
-      TIM_ClearITPendingBit(TIM7, TIM_IT_Update);
-      ++time_ms;
+    ++time_ms;
 
-      ONE_MS = true;
-      if(!(time_ms % 10))
-        TEN_MS = true;
-      if(!(time_ms % 25))
-        TWENTY_FIVE_MS = true;
-      if(!(time_ms % 50))
-      {
-        SPI3SendReceive();
-        FIFTY_MS = true;
-      }
-      if(!(time_ms % 100))
-        HUNDRED_MS = true;
-    }
+    ONE_MS = true;
+    if(!(time_ms % 10))
+      TEN_MS = true;
+    if(!(time_ms % 25))
+      TWENTY_FIVE_MS = true;
+    if(!(time_ms % 50))
+      FIFTY_MS = true;
+    if(!(time_ms % 100))
+      HUNDRED_MS = true;
   }
-  /************************************************************************************************
-  Принимает по CAN дискретные сигналы с ОУ - ЗАДЕЛ НА ДИСТАНЦИОННОЕ УПРАВЛЕНИЕ.
-  Обеспечение взаимодействия по протоколу (калибровка и настройка контроллера с помощью ПО на ПК).
-  Обработка цифровых датчиков и EEC1.
-  ПО ВОЗМОЖНОСТИ ПЕРЕНЕСТИ ВСЮ ЛОГИКУ В ОБЩИЙ ЦИКЛ ПРОГРАММЫ (main).
-  ************************************************************************************************/
   void CAN1_RX0_IRQHandler()
   {
     if(CAN_GetITStatus(CAN1, CAN_IT_FMP0))
@@ -637,44 +638,7 @@ extern "C"
       CAN_ClearITPendingBit(CAN1, CAN_IT_FMP0);
       CAN_Receive(CAN1, CAN_FIFO0, &RxMsg);
       CAN_FIFORelease(CAN1, CAN_FIFO0);
-      
-      if(RxMsg.IDE == CAN_ID_STD)
-        switch(RxMsg.StdId)
-        {
-          case 0x010: cal.CtrlAndRPM(RxMsg.Data[0],RxMsg.Data[2]<<8|RxMsg.Data[1]);          break;
-          case 0x100: cal.OtLeftTime(RxMsg);                                                 break;
-          case 0x101: cal.OtLeftPres(RxMsg);                                                 break;
-          case 0x102: cal.OtRightTime(RxMsg);                                                break;
-          case 0x103: cal.OtRightPres(RxMsg);                                                break;
-          case 0x104: cal.BfLeftTime(RxMsg);                                                 break;
-          case 0x105: cal.BfLeftPres(RxMsg);                                                 break;
-          case 0x106: cal.BfRightTime(RxMsg);                                                break;
-          case 0x107: cal.BfRightPres(RxMsg);                                                break;
-          case 0x108: cal.ForwardTime(RxMsg);                                                break;
-          case 0x109: cal.ForwardPres(RxMsg);                                                break;
-          case 0x10A: cal.ReverseTime(RxMsg);                                                break;
-          case 0x10B: cal.ReversePres(RxMsg);                                                break;
-          case 0x10C: cal.OneTime(RxMsg);                                                    break;
-          case 0x10D: cal.OnePres(RxMsg);                                                    break;
-          case 0x10E: cal.TwoTime(RxMsg);                                                    break;
-          case 0x10F: cal.TwoPres(RxMsg);                                                    break;
-          case 0x110: cal.ThreeTime(RxMsg);                                                  break;
-          case 0x111: cal.ThreePres(RxMsg);                                                  break;
-          case 0x112: cal.Save();                                                            break;
-          case 0x113: cal.SendData();                                                        break;
-          case 0x114: cal.SendDataValve();                                                   break;
-          case 0x120: state = static_cast<Calibrate::State>(RxMsg.Data[0]);                  break;
-          case 0x181:
-            pres.i = RxMsg.Data[3] << 24 | RxMsg.Data[2] << 16 | RxMsg.Data[1] << 8 |RxMsg.Data[0];
-            if(pres.f < 0)
-              pres.f = 0;
-            break;
-        }
-      else
-        switch(RxMsg.ExtId)
-        {
-          case 0x0CF00400: kpp.SetRpm(RxMsg.Data[4] << 8 | RxMsg.Data[3]); break;
-        }
+      QueueCanRxMsg.push(RxMsg);
     }
   }
   void CAN1_RX1_IRQHandler()

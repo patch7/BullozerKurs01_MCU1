@@ -191,7 +191,8 @@ public:
     clutch_ch(0),
     parking(1),
     direct_ch(0),
-    clutch(0) {}
+    clutch(0),
+    old_clutch_st(0) {}
   KPP(const KPP&)             = delete;
   KPP(KPP&&)                  = delete;
   KPP& operator= (const KPP&) = delete;
@@ -256,18 +257,19 @@ private:
   uint16_t rpm     = 0;//Текущие обороты ДВС.
   uint8_t  mul_tim = maxpwm / num_point;//Коэффициент для заполнения ШИМ
 
-  uint8_t direction  : 2;//00 - N,    01 - F,   10 - R,    11 - Not available
-  uint8_t clutch_st  : 2;//00 - none, 01 - '+', 10 - '-',  11 - Not available
-  uint8_t parking    : 2;//00 - off,  01 - on,  10 - res,  11 - Don't care
-  uint8_t reverse    : 2;//00 - off,  01 - on,  10 - res,  11 - Don't care
-  uint8_t clutch     : 2;//00 - 0,    01 - 1,   10 - 2,    11 - 3
-  uint8_t old_direct : 2;//00 - N,    01 - F,   10 - R,    11 - Not available
-  uint8_t oil_filter : 1;//true/false
-  //uint8_t d_generator: 1;//true/false
-  uint8_t start_eng  : 1;//true/false
-  uint8_t parking_ch : 1;//true/false
-  uint8_t clutch_ch  : 1;//true/false
-  uint8_t direct_ch  : 1;//true/false
+  uint8_t direction    : 2;//00 - N,    01 - F,   10 - R,    11 - Not available
+  uint8_t clutch_st    : 2;//00 - none, 01 - '+', 10 - '-',  11 - Not available
+  uint8_t parking      : 2;//00 - off,  01 - on,  10 - res,  11 - Don't care
+  uint8_t reverse      : 2;//00 - off,  01 - on,  10 - res,  11 - Don't care
+  uint8_t clutch       : 2;//00 - 0,    01 - 1,   10 - 2,    11 - 3
+  uint8_t old_direct   : 2;//00 - N,    01 - F,   10 - R,    11 - Not available
+  uint8_t old_clutch_st: 2;//00 - none, 01 - '+', 10 - '-',  11 - Not available
+  uint8_t oil_filter   : 1;//true/false
+  //uint8_t d_generator  : 1;//true/false
+  uint8_t start_eng    : 1;//true/false
+  uint8_t parking_ch   : 1;//true/false
+  uint8_t clutch_ch    : 1;//true/false
+  uint8_t direct_ch    : 1;//true/false
 
   bool UseRud  = true;
   bool PropF   = false;

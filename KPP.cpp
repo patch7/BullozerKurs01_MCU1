@@ -17,7 +17,8 @@ void KPP::DigitalSet(const uint32_t data)
   if((reverse & 1) != ((data >> 17) & 1))
     reverse ^= 1;
 
-  clutch_st = ((data >> 18) & 3);
+  if(old_clutch_st != ((data >> 18) & 3))
+    old_clutch_st = clutch_st = ((data >> 18) & 3);
 
   if(7 & (data >> 20))
   {
