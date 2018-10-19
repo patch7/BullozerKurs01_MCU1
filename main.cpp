@@ -92,7 +92,6 @@ void TimerInit(void);
 void FlashInit(void);
 void DMAandSPIInit(void);
 bool CanTxMailBoxEmpty(CAN_TypeDef*);
-void SPI3SendReceive(void);
 
 void main()
 {
